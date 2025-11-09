@@ -10,6 +10,8 @@ const ytDlpWrap = new YTDlpWrap();
 app.use(cors());
 app.use(express.json());
 
+app.use(express.static(path.join(__dirname, 'public')));
+
 function formatFileSize(bytes) {
     if (!bytes) return 'N/A';
     const sizes = ['B', 'KB', 'MB', 'GB'];
@@ -105,4 +107,8 @@ const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
+});
+
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });

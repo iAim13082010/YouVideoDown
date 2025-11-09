@@ -1,4 +1,4 @@
-const API_URL = 'https://youvideodown.onrender.com/api';
+const API_URL = window.location.origin + '/api';
 
 let currentVideoData = null;
 let currentMode = 'video';
