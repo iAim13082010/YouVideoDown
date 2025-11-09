@@ -10,8 +10,6 @@ const ytDlpWrap = new YTDlpWrap();
 app.use(cors());
 app.use(express.json());
 
-app.use(express.static(path.join(__dirname, 'public')));
-
 function formatFileSize(bytes) {
     if (!bytes) return 'N/A';
     const sizes = ['B', 'KB', 'MB', 'GB'];
@@ -64,7 +62,7 @@ app.post('/api/video-info', async (req, res) => {
     } catch (error) {
         console.error('Error getting video info:', error);
         res.status(500).json({ 
-            error: 'Không thể lấy thông tin video! Vui lòng kiểm tra lại link.' 
+            error: 'Không thể lấy thông tin video. Vui lòng kiểm tra lại link.' 
         });
     }
 });
@@ -97,7 +95,7 @@ app.get('/api/download', async (req, res) => {
         console.error('Error downloading video:', error);
         if (!res.headersSent) {
             res.status(500).json({ 
-                error: 'Không thể tải video! Vui lòng thử lại.' 
+                error: 'Không thể tải video. Vui lòng thử lại.' 
             });
         }
     }
@@ -106,9 +104,5 @@ app.get('/api/download', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
-
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    console.log(`🚀 Server is running on http://localhost:${PORT}`);
 });
