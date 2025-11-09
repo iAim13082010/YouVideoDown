@@ -3,60 +3,81 @@ const cors = require('cors');
 const YTDlpWrap = require('yt-dlp-wrap').default;
 const path = require('path');
 const fs = require('fs');
-const app = express();
+const https = require('https');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 
+const app = express();
 app.use(cors());
 app.use(express.json());
 
 let ytDlpWrap;
 
+async function downloadYtDlpStandalone() {
+    const tmpDir = path.join(__dirname, 'tmp');
+    if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true });
+    }
+
+    const ytDlpPath = path.join(tmpDir, 'yt-dlp');
+    
+    // URL cho Linux standalone binary (không cần Python)
+    const downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
+    
+    console.log('📥 Downloading yt-dlp standalone binary (no Python needed)...');
+    
+    return new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(ytDlpPath);
+        
+        https.get(downloadUrl, (response) => {
+            if (response.statusCode === 302 || response.statusCode === 301) {
+                https.get(response.headers.location, (redirectResponse) => {
+                    redirectResponse.pipe(file);
+                    file.on('finish', () => {
+                        file.close();
+                        fs.chmodSync(ytDlpPath, 0o755);
+                        console.log('✅ Downloaded standalone binary');
+                        resolve(ytDlpPath);
+                    });
+                });
+            } else {
+                response.pipe(file);
+                file.on('finish', () => {
+                    file.close();
+                    fs.chmodSync(ytDlpPath, 0o755);
+                    console.log('✅ Downloaded standalone binary');
+                    resolve(ytDlpPath);
+                });
+            }
+        }).on('error', (err) => {
+            fs.unlink(ytDlpPath, () => {});
+            reject(err);
+        });
+        
+        file.on('error', (err) => {
+            fs.unlink(ytDlpPath, () => {});
+            reject(err);
+        });
+    });
+}
+
 async function initYtDlp() {
     try {
-        console.log('📥 Starting yt-dlp initialization...');
+        console.log('🚀 Starting yt-dlp initialization...');
         
-        // Tạo thư mục tmp nếu chưa có
-        const tmpDir = path.join(__dirname, 'tmp');
-        if (!fs.existsSync(tmpDir)) {
-            fs.mkdirSync(tmpDir, { recursive: true });
-            console.log('✅ Created tmp directory');
-        }
-
-        // Chỉ định path để lưu yt-dlp
-        const ytDlpPath = path.join(tmpDir, 'yt-dlp');
-        
-        console.log('📥 Downloading yt-dlp binary to:', ytDlpPath);
-        
-        // Download với path cụ thể
-        await YTDlpWrap.downloadFromGithub(ytDlpPath);
-        
-        // Kiểm tra file có tồn tại không
-        if (!fs.existsSync(ytDlpPath)) {
-            throw new Error('yt-dlp binary not found after download');
-        }
-        
-        console.log('✅ yt-dlp downloaded successfully');
+        const ytDlpPath = await downloadYtDlpStandalone();
         console.log('📁 Binary path:', ytDlpPath);
         
-        // Kiểm tra quyền execute
-        try {
-            fs.chmodSync(ytDlpPath, 0o755);
-            console.log('✅ Set execute permission');
-        } catch (err) {
-            console.warn('⚠️  Could not set execute permission:', err.message);
-        }
-        
-        // Khởi tạo ytDlpWrap với path
-        ytDlpWrap = new YTDlpWrap(ytDlpPath);
-        
-        // Test xem có hoạt động không
+        // Test binary
         console.log('🧪 Testing yt-dlp...');
-        const version = await ytDlpWrap.getVersion();
-        console.log('✅ yt-dlp version:', version);
+        const { stdout } = await execAsync(`${ytDlpPath} --version`);
+        console.log('✅ yt-dlp version:', stdout.trim());
         
+        ytDlpWrap = new YTDlpWrap(ytDlpPath);
         return true;
     } catch (error) {
-        console.error('❌ Failed to initialize yt-dlp:', error);
-        console.error('Error details:', error.stack);
+        console.error('❌ Failed to initialize yt-dlp:', error.message);
         return false;
     }
 }
@@ -86,13 +107,11 @@ app.post('/api/video-info', async (req, res) => {
 
         if (!ytDlpWrap) {
             return res.status(503).json({ 
-                error: 'Server is still initializing. Please wait a moment and try again.' 
+                error: 'Server is still initializing. Please wait and try again.' 
             });
         }
 
-        console.log('🔍 Getting video info for:', url);
         const info = await ytDlpWrap.getVideoInfo(url);
-        console.log('✅ Video info retrieved:', info.title);
         
         const videoFormats = info.formats
             .filter(f => f.vcodec !== 'none' && f.acodec !== 'none')
@@ -163,8 +182,6 @@ app.get('/api/download', async (req, res) => {
             });
         }
 
-        console.log('⬇️  Downloading format:', format_id, 'from:', url);
-        
         const info = await ytDlpWrap.getVideoInfo(url);
         const title = info.title.replace(/[^\w\s-]/g, '');
         const format = info.formats.find(f => f.format_id === format_id);
@@ -200,19 +217,13 @@ app.get('/api/download', async (req, res) => {
 
 const PORT = process.env.PORT || 8080;
 
-// Khởi động server
-console.log('🚀 Starting server initialization...');
+console.log('🎬 Initializing YouTube Downloader Server...');
 initYtDlp().then((success) => {
     app.listen(PORT, () => {
-        console.log(`🚀 Server is running on port ${PORT}`);
-        if (success) {
-            console.log('✅ yt-dlp ready to use');
-        } else {
-            console.log('⚠️  Server started but yt-dlp is NOT available');
-            console.log('❌ Video download features will not work');
-        }
+        console.log(`🚀 Server running on port ${PORT}`);
+        console.log(success ? '✅ Ready to download!' : '❌ yt-dlp unavailable');
     });
 }).catch(error => {
-    console.error('💥 Failed to start server:', error);
+    console.error('💥 Startup failed:', error);
     process.exit(1);
 });
