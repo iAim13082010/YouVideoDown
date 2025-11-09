@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const YTDlpWrap = require('yt-dlp-wrap').default;
+const path = require('path');
+const fs = require('fs');
 const app = express();
 
 app.use(cors());
@@ -8,16 +10,53 @@ app.use(express.json());
 
 let ytDlpWrap;
 
-// Tự động download yt-dlp binary khi khởi động
 async function initYtDlp() {
     try {
-        console.log('📥 Downloading yt-dlp binary from GitHub...');
-        const ytDlpPath = await YTDlpWrap.downloadFromGithub();
+        console.log('📥 Starting yt-dlp initialization...');
+        
+        // Tạo thư mục tmp nếu chưa có
+        const tmpDir = path.join(__dirname, 'tmp');
+        if (!fs.existsSync(tmpDir)) {
+            fs.mkdirSync(tmpDir, { recursive: true });
+            console.log('✅ Created tmp directory');
+        }
+
+        // Chỉ định path để lưu yt-dlp
+        const ytDlpPath = path.join(tmpDir, 'yt-dlp');
+        
+        console.log('📥 Downloading yt-dlp binary to:', ytDlpPath);
+        
+        // Download với path cụ thể
+        await YTDlpWrap.downloadFromGithub(ytDlpPath);
+        
+        // Kiểm tra file có tồn tại không
+        if (!fs.existsSync(ytDlpPath)) {
+            throw new Error('yt-dlp binary not found after download');
+        }
+        
+        console.log('✅ yt-dlp downloaded successfully');
+        console.log('📁 Binary path:', ytDlpPath);
+        
+        // Kiểm tra quyền execute
+        try {
+            fs.chmodSync(ytDlpPath, 0o755);
+            console.log('✅ Set execute permission');
+        } catch (err) {
+            console.warn('⚠️  Could not set execute permission:', err.message);
+        }
+        
+        // Khởi tạo ytDlpWrap với path
         ytDlpWrap = new YTDlpWrap(ytDlpPath);
-        console.log('✅ yt-dlp downloaded successfully at:', ytDlpPath);
+        
+        // Test xem có hoạt động không
+        console.log('🧪 Testing yt-dlp...');
+        const version = await ytDlpWrap.getVersion();
+        console.log('✅ yt-dlp version:', version);
+        
         return true;
     } catch (error) {
-        console.error('❌ Failed to download yt-dlp:', error);
+        console.error('❌ Failed to initialize yt-dlp:', error);
+        console.error('Error details:', error.stack);
         return false;
     }
 }
@@ -28,6 +67,14 @@ function formatFileSize(bytes) {
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
 }
+
+app.get('/api/health', (req, res) => {
+    res.json({ 
+        status: ytDlpWrap ? 'ok' : 'initializing',
+        message: ytDlpWrap ? 'Server is running' : 'Server is initializing...',
+        ytdlpReady: !!ytDlpWrap
+    });
+});
 
 app.post('/api/video-info', async (req, res) => {
     try {
@@ -43,7 +90,9 @@ app.post('/api/video-info', async (req, res) => {
             });
         }
 
+        console.log('🔍 Getting video info for:', url);
         const info = await ytDlpWrap.getVideoInfo(url);
+        console.log('✅ Video info retrieved:', info.title);
         
         const videoFormats = info.formats
             .filter(f => f.vcodec !== 'none' && f.acodec !== 'none')
@@ -114,6 +163,8 @@ app.get('/api/download', async (req, res) => {
             });
         }
 
+        console.log('⬇️  Downloading format:', format_id, 'from:', url);
+        
         const info = await ytDlpWrap.getVideoInfo(url);
         const title = info.title.replace(/[^\w\s-]/g, '');
         const format = info.formats.find(f => f.format_id === format_id);
@@ -147,26 +198,21 @@ app.get('/api/download', async (req, res) => {
     }
 });
 
-app.get('/api/health', (req, res) => {
-    res.json({ 
-        status: ytDlpWrap ? 'ok' : 'initializing',
-        message: ytDlpWrap ? 'Server is running' : 'Server is initializing...'
-    });
-});
-
 const PORT = process.env.PORT || 8080;
 
-// Khởi động server sau khi download yt-dlp
+// Khởi động server
+console.log('🚀 Starting server initialization...');
 initYtDlp().then((success) => {
     app.listen(PORT, () => {
         console.log(`🚀 Server is running on port ${PORT}`);
         if (success) {
             console.log('✅ yt-dlp ready to use');
         } else {
-            console.log('⚠️  Server started but yt-dlp may not be available');
+            console.log('⚠️  Server started but yt-dlp is NOT available');
+            console.log('❌ Video download features will not work');
         }
     });
 }).catch(error => {
-    console.error('Failed to start server:', error);
+    console.error('💥 Failed to start server:', error);
     process.exit(1);
 });
