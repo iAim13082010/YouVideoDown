@@ -111,10 +111,25 @@ app.post('/api/video-info', async (req, res) => {
             });
         }
 
-        const info = await ytDlpWrap.getVideoInfo(url);
-        
+        let info;
+        try {
+            info = await ytDlpWrap.getVideoInfo(url);
+        } catch (err) {
+            console.error('Failed to fetch video info:', err.message);
+            return res.status(500).json({
+                error: 'Không thể lấy thông tin video. Vui lòng kiểm tra lại link.'
+            });
+        }
+
+        // ✅ Kiểm tra nếu formats không tồn tại hoặc không phải mảng
+        if (!info || !Array.isArray(info.formats)) {
+            return res.status(500).json({
+                error: 'Thông tin định dạng video không khả dụng. Link có thể không hợp lệ.'
+            });
+        }
+
         const videoFormats = info.formats
-            .filter(f => f.vcodec !== 'none' && f.acodec !== 'none')
+            .filter(f => f.vcodec !== 'none' && f.acodec !== 'none' && f.format_id)
             .map(f => ({
                 format_id: f.format_id,
                 quality: f.format_note || f.resolution || 'Unknown',
@@ -128,7 +143,7 @@ app.post('/api/video-info', async (req, res) => {
             });
 
         const audioFormats = info.formats
-            .filter(f => f.vcodec === 'none' && f.acodec !== 'none')
+            .filter(f => f.vcodec === 'none' && f.acodec !== 'none' && f.format_id)
             .map(f => ({
                 format_id: f.format_id,
                 quality: `${f.abr || 'Unknown'}kbps`,
