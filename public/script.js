@@ -1,4 +1,4 @@
-const API_URL = 'https://youvideodown-production.up.railway.app/api';
+const API_URL = 'https://youvideodown.onrender.com/api';
 
 let currentVideoData = null;
 let currentMode = 'video';

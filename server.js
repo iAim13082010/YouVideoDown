@@ -62,7 +62,7 @@ app.post('/api/video-info', async (req, res) => {
     } catch (error) {
         console.error('Error getting video info:', error);
         res.status(500).json({ 
-            error: 'KhÃ´ng thá»ƒ láº¥y thÃ´ng tin video. Vui lÃ²ng kiá»ƒm tra láº¡i link.' 
+            error: 'Không thể lấy thông tin video! Vui lòng kiểm tra lại link.' 
         });
     }
 });
@@ -95,7 +95,7 @@ app.get('/api/download', async (req, res) => {
         console.error('Error downloading video:', error);
         if (!res.headersSent) {
             res.status(500).json({ 
-                error: 'KhÃ´ng thá»ƒ táº£i video. Vui lÃ²ng thá»­ láº¡i.' 
+                error: 'Không thể tải video! Vui lòng thử lại.' 
             });
         }
     }
@@ -104,5 +104,5 @@ app.get('/api/download', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-    console.log(`ðŸš€ Server is running on http://localhost:${PORT}`);
+    console.log(`Server is running on http://localhost:${PORT}`);
 });
