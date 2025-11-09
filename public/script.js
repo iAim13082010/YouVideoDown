@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:3000/api';
+const API_URL = 'https://yvd.up.railway.app/api';
 
 let currentVideoData = null;
 let currentMode = 'video';

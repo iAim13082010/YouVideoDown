@@ -1,14 +1,26 @@
 const express = require('express');
 const cors = require('cors');
 const YTDlpWrap = require('yt-dlp-wrap').default;
-const fs = require('fs');
-const path = require('path');
-
 const app = express();
-const ytDlpWrap = new YTDlpWrap();
 
 app.use(cors());
 app.use(express.json());
+
+let ytDlpWrap;
+
+// Tự động download yt-dlp binary khi khởi động
+async function initYtDlp() {
+    try {
+        console.log('📥 Downloading yt-dlp binary from GitHub...');
+        const ytDlpPath = await YTDlpWrap.downloadFromGithub();
+        ytDlpWrap = new YTDlpWrap(ytDlpPath);
+        console.log('✅ yt-dlp downloaded successfully at:', ytDlpPath);
+        return true;
+    } catch (error) {
+        console.error('❌ Failed to download yt-dlp:', error);
+        return false;
+    }
+}
 
 function formatFileSize(bytes) {
     if (!bytes) return 'N/A';
@@ -25,9 +37,14 @@ app.post('/api/video-info', async (req, res) => {
             return res.status(400).json({ error: 'URL is required' });
         }
 
+        if (!ytDlpWrap) {
+            return res.status(503).json({ 
+                error: 'Server is still initializing. Please wait a moment and try again.' 
+            });
+        }
+
         const info = await ytDlpWrap.getVideoInfo(url);
         
-        // Extract video formats
         const videoFormats = info.formats
             .filter(f => f.vcodec !== 'none' && f.acodec !== 'none')
             .map(f => ({
@@ -36,9 +53,12 @@ app.post('/api/video-info', async (req, res) => {
                 format: f.ext,
                 size: formatFileSize(f.filesize || f.filesize_approx),
                 resolution: f.resolution || 'N/A'
-            }));
+            }))
+            .sort((a, b) => {
+                const getHeight = (res) => parseInt(res?.split('x')[1]) || 0;
+                return getHeight(b.resolution) - getHeight(a.resolution);
+            });
 
-        // Extract audio formats
         const audioFormats = info.formats
             .filter(f => f.vcodec === 'none' && f.acodec !== 'none')
             .map(f => ({
@@ -46,7 +66,20 @@ app.post('/api/video-info', async (req, res) => {
                 quality: `${f.abr || 'Unknown'}kbps`,
                 format: f.ext,
                 size: formatFileSize(f.filesize || f.filesize_approx)
-            }));
+            }))
+            .sort((a, b) => {
+                const bitrateA = parseInt(a.quality) || 0;
+                const bitrateB = parseInt(b.quality) || 0;
+                return bitrateB - bitrateA;
+            });
+
+        const uniqueVideoFormats = Array.from(
+            new Map(videoFormats.map(f => [f.quality, f])).values()
+        );
+        
+        const uniqueAudioFormats = Array.from(
+            new Map(audioFormats.map(f => [f.quality, f])).values()
+        );
 
         res.json({
             title: info.title,
@@ -54,8 +87,8 @@ app.post('/api/video-info', async (req, res) => {
             duration: info.duration,
             author: info.uploader,
             formats: {
-                video: videoFormats.slice(0, 10),
-                audio: audioFormats.slice(0, 5)
+                video: uniqueVideoFormats.slice(0, 10),
+                audio: uniqueAudioFormats.slice(0, 5)
             }
         });
 
@@ -75,14 +108,20 @@ app.get('/api/download', async (req, res) => {
             return res.status(400).json({ error: 'URL and format_id are required' });
         }
 
+        if (!ytDlpWrap) {
+            return res.status(503).json({ 
+                error: 'Server is still initializing. Please try again.' 
+            });
+        }
+
         const info = await ytDlpWrap.getVideoInfo(url);
         const title = info.title.replace(/[^\w\s-]/g, '');
         const format = info.formats.find(f => f.format_id === format_id);
         const ext = format?.ext || 'mp4';
 
         res.setHeader('Content-Disposition', `attachment; filename="${title}.${ext}"`);
+        res.setHeader('Content-Type', 'application/octet-stream');
 
-        // Stream download
         const stream = ytDlpWrap.execStream([
             url,
             '-f', format_id,
@@ -90,6 +129,13 @@ app.get('/api/download', async (req, res) => {
         ]);
 
         stream.pipe(res);
+
+        stream.on('error', (error) => {
+            console.error('Stream error:', error);
+            if (!res.headersSent) {
+                res.status(500).json({ error: 'Download failed' });
+            }
+        });
 
     } catch (error) {
         console.error('Error downloading video:', error);
@@ -101,8 +147,26 @@ app.get('/api/download', async (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 3000;
+app.get('/api/health', (req, res) => {
+    res.json({ 
+        status: ytDlpWrap ? 'ok' : 'initializing',
+        message: ytDlpWrap ? 'Server is running' : 'Server is initializing...'
+    });
+});
 
-app.listen(PORT, () => {
-    console.log(`🚀 Server is running on http://localhost:${PORT}`);
+const PORT = process.env.PORT || 8080;
+
+// Khởi động server sau khi download yt-dlp
+initYtDlp().then((success) => {
+    app.listen(PORT, () => {
+        console.log(`🚀 Server is running on port ${PORT}`);
+        if (success) {
+            console.log('✅ yt-dlp ready to use');
+        } else {
+            console.log('⚠️  Server started but yt-dlp may not be available');
+        }
+    });
+}).catch(error => {
+    console.error('Failed to start server:', error);
+    process.exit(1);
 });
